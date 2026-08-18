@@ -1,0 +1,261 @@
+capture log close
+log using "..\log_Files\LOGPS", text replace
+
+version 19.5
+clear all
+set more off
+/*
+Tobias Morgenstern
+Makroökonomisches Seminar SoSe 2026
+Problemset 1: Empirische Makroökonomik
+
+Verwendete FRED-Zeitreihen:
+- A067RX (Real Disposable Personal Income) ~ Einkommen
+- A191RX (Real Gross Domestic Product) ~ BIP
+- DPCERX (Real Personal Consumption Expenditures) ~ KONSUM
+- LNS14000000 (Unemployment Rate) ~ Arbeitslosenquote
+*/
+
+
+*ABSCHNITT 1: Datenaufbereitung
+*(alle Datensätze der FRED wurden zuvor bereits von .csv zu .dta umgewandelt)
+*****************************************************************************
+
+
+****** 1.1 Einkommen
+*einlesen des Einkommensdatensatz von der FRED Q1 1947 - Q1 2026
+use ..\data\INCOME.dta, clear
+
+*definieren einer Datumsvariable und zum lesbaren formatieren
+gen DATE = tq(1946q4) + _n
+format DATE %tq
+tsset DATE
+drop observation_date
+order DATE
+
+save ..\data\INCOMEDATA.dta, replace
+
+****** 1.2 BIP
+*einlesen der BIP Daten der FRED Q1 1947 - Q1 2026
+use ..\data\BIP.dta, clear
+
+*definieren einer Datumsvariable und zum lesbaren formatieren
+gen DATE = tq(1946q4) + _n
+format DATE %tq
+tsset DATE
+drop observation_date
+order DATE
+
+*Mergen des Einkommens und BIP Datensatzes
+merge 1:1 DATE using ..\data\INCOMEDATA.dta
+drop _merge
+save ..\data\MERGED1.dta, replace
+
+****** 1.3 KONSUM
+* einlesen der Konsum Daten der FRED Q1 1947 - Q1 2026
+use ..\data\KONSUM.dta, clear
+
+*definieren einer Datumsvariable und zum lesbaren formatieren
+gen DATE = tq(1946q4) + _n
+format DATE %tq
+tsset DATE
+drop observation_date
+order DATE
+
+*Mergen des Konsumdatensatzes mit dem bereits zusammengefügten Datensatz aus Einkommen und BIP
+merge 1:1 DATE using ..\data\MERGED1.dta
+
+drop _merge
+
+save ..\data\MERGED2.dta, replace
+
+****** 1.4 Arbeitslosenquote
+*einlesen der Arbeitslosenquoten Daten der FRED Q1 1947 - Q1 2026
+use ..\data\Arbeitslosenquote.dta, clear
+
+*definieren einer Datumsvariable und zum lesbaren formatieren
+gen tmpx= -145 + _n  
+gen xdate=dofm(tmpx) 
+drop tmpx
+format xdate %d
+gen DATE = qofd(xdate) 
+format DATE %tq
+
+*collapse des Datensatzes auf Quartale mit Durchschnitten der Monate
+collapse unrate ,by(DATE)
+
+merge 1:1 DATE using ..\data\MERGED2.dta
+
+save ..\data\Problemsetdata.dta, replace
+
+*ABSCHNITT 2: Aufgabe 1 
+*********************************************************************
+***
+*a)
+***
+use ..\data\Problemsetdata.dta, clear
+
+
+*Umbenennung der Variablen 
+rename gdpc1 BIP
+rename pcecc96 Konsum
+rename dpic96 Einkommen
+
+*Labeln der Variblen
+label variable BIP "Reales Bruttoinlandsprodukt"
+label variable Einkommen "Reales verfügbares Einkommen"
+label variable Konsum "Reale private Konsumausgaben"
+
+*löschen der Daten ab COVID (erstes Quartal 2020)
+drop if DATE >= tq(2020q1)
+
+
+summarize Konsum BIP Einkommen
+
+
+* Statistiken im Hintergrund speichern
+estpost summarize Konsum BIP Einkommen
+
+* Tabelle als LaTeX-Datei exportieren
+estpost summarize Konsum BIP Einkommen
+esttab using "..\outputs\summary_statistics.tex", replace ///
+    cells("count(fmt(%9.0g) label(Obs)) mean(fmt(%9.2fc) label(Mittelwert)) sd(fmt(%9.2fc) label(Std.Abw.)) min(fmt(%9.2fc) label(Min)) max(fmt(%9.2fc) label(Max))") ///
+    nomtitle nonumber noobs ///
+    label booktabs fragment ///
+    postfoot("\bottomrule")
+
+***
+*b)
+***
+*einfache Regression schätzen
+reg Konsum Einkommen
+
+*Test auf Heteroskedastizität	
+estat hettest
+
+*Test auf Omitted Variable Bias
+estat ovtest
+
+* Regression mit robusten Standardfehlern schätzen und abspeichern
+eststo modell1: reg Konsum Einkommen, vce(robust)
+
+* LaTeX export 
+esttab modell1 using "../outputs/regression_konsum.tex", replace ///
+    b(3) se(3) ///
+    star(* 0.10 ** 0.05 *** 0.01) ///
+    label booktabs ///
+    width(\textwidth) ///
+    stats(N r2 r2_a F rmse, ///
+        labels("Beobachtungen" "\$R^2\$" "Adj. \$R^2\$" "\$F\$-Statistik" "Root MSE") ///
+        fmt(0 3 3 2 2)) ///
+    coeflabels(_cons "Konstante") ///
+    nomtitle nonumbers nonotes
+
+
+
+	
+***
+*c)
+***
+*Die Definition eines Rezession Dummys erfolgt hier zweistufig:
+*1.Definition einer Variable die zählt ob BIP gesunken im Vergleich zum Vorquartal
+gen bip_rueckgang = 0
+
+*zunächst muss der Datensatz sortiert werden damit der LAG Operator funktioniert
+sort DATE
+replace bip_rueckgang = 1 if BIP < L.BIP & L.BIP != .
+
+*2.Rezession Dummy der 1 wird bei 2 quartale BIP-Rückgang
+gen rezession = 0
+sort DATE
+replace rezession = 1 if bip_rueckgang == 1 & L.bip_rueckgang == 1
+
+*Regression mit der rezessions Variable
+reg Konsum Einkommen rezession, vce(robust)
+	
+	
+*LaTeX Export	
+* Modell 2 schätzen und speichern
+eststo modell2: reg Konsum Einkommen rezession, vce(robust)
+
+* LaTeX Export
+esttab modell2 using "../outputs/regression_konsum_rezession.tex", replace ///
+    b(3) se(3) ///
+    star(* 0.10 ** 0.05 *** 0.01) ///
+    label booktabs ///
+    width(\textwidth) ///
+    stats(N r2 r2_a F rmse, ///
+        labels("Beobachtungen" "\$R^2\$" "Adj. \$R^2\$" "\$F\$-Statistik" "Root MSE") ///
+        fmt(0 3 3 2 2)) ///
+    coeflabels(_cons "Konstante" rezession "Rezessions-Dummy") ///
+    nomtitle nonumbers nonotes
+	
+***
+*d)	
+***
+*Stilles schätzen der Ausgangsregression sowie Durchführung des Durbin Watson Tests
+quietly reg Konsum Einkommen
+estat dwatson
+
+
+
+*ABSCHNITT 3: Aufgabe 2
+**********************************************************************
+***
+*a)
+***
+
+rename unrate Arbeitslosenquote
+
+*generieren einer logarithmierten BIP Variable
+gen BIP_ln = ln(BIP)
+
+*Regression von Arbeitslosenquote auf logarithmiertes BIP
+reg Arbeitslosenquote BIP_ln
+
+*errechnen der Durbin Watson Statistik
+estat dwatson
+
+***
+*b)
+***
+*ZUnächst eine Differenz Variable für Arbeitslosenquote und BIP definieren
+
+gen Arbeitslosenqdif = Arbeitslosenquote - L.Arbeitslosenquote
+gen BIP_ln_Dif = BIP_ln - L.BIP_ln
+
+*Regression von Arbeitslosenquotendifferenz auf BIP Differenz
+reg Arbeitslosenqdif BIP_ln_Dif
+estat dwatson
+
+*Berechnung von BIP Wachstum für konstante Arbeitslosenquote
+di -_b[_cons]/_b[BIP_ln_Dif]
+
+
+***
+*c)
+***
+*Output Lücke berechnen
+tsfilter hp BIP_hp = BIP_ln, smooth(1600)
+
+*Arbeitslosenlücke berechnen
+tsfilter hp Arbeitslosenquote_hp = Arbeitslosenquote, smooth(1600)
+
+*Regression
+reg Arbeitslosenquote_hp BIP_hp
+estat dwatson
+
+* Scatterplot der OutpuT/Arbeitslosen-Lücke
+twoway (scatter Arbeitslosenquote_hp BIP_hp) ///
+       (lfit Arbeitslosenquote_hp BIP_hp, ), ///
+       yline(0) ///
+       xline(0)  ///
+       ytitle("Arbeitslosen-Lücke") ///
+       xtitle("Output-Lücke") ///
+       legend(order(1 "Beobachtungen (Quartale)" 2 "Regressionsgerade")) ///
+       title("Okunsches Gesetz: Lücken-Spezifikation")
+
+graph export "okunisches_gesetz.pdf", replace  
+	   
+log close
+exit 
