@@ -1,1 +1,208 @@
+capture log close
+log using "..\log\LOGPS2", text replace
 
+version 19.5
+clear all
+set more off
+/*
+Tobias Morgenstern
+Makroökonomisches Seminar SoSe 2026
+Problemset 2: Empirische Makroökonomik
+*/
+********************************************************
+*Aufgabe 1 
+*a)
+use ..\data\arma_problemset.dta , clear
+
+*Zeitreihensetzung
+tsset t
+
+*Grafikerstellung
+tsline y
+
+*ADF Test 
+varsoc y
+dfuller y, lags(2) 
+
+*b)
+ac y, lags(12) title("Autokorrelationsfunktion (ACF)")
+
+pac y, lags(12) title("Partielle Autokorrelationsfunktion (PACF)")
+
+*c)
+* Modelle schätzen und speichern
+arima y, ar(1)
+estat ic
+estimates store m1
+
+arima y, ar(1/2)
+estat ic
+estimates store m2
+
+arima y, ar(1/3)
+estat ic
+estimates store m3
+
+* Export für LaTeX
+esttab m1 m2 m3 using "../modellvergleich.tex", replace ///
+    fragment nomtitles nonumbers nodepvars nonotes nolines ///
+    cells(b(star fmt(3)) se(par fmt(3))) ///
+    stats(N ll aic bic, labels("Beobachtungen" "Log-Likelihood (LL)" "AIC" "BIC") fmt(0 2 2 2)) ///
+    coeflabels(ARMA:L.ar "AR-Lag 1 ($\phi_1$)" ARMA:L2.ar "AR-Lag 2 ($\phi_2$)" ARMA:L3.ar "AR-Lag 3 ($\phi_3$)" _cons "Konstante ($\mu$)")
+
+	
+*****
+*d)
+arima y, ar(1/2) 
+predict e, residuals
+
+*Ljung Box test
+wntestq e
+
+arima y, ar(1/3) 
+predict e2, residuals
+wntestq e2
+
+arima y, ar(1/4) 
+predict e3, residuals
+wntestq e3
+
+************************
+*Aufgabe 2
+
+use "..\data\Oil Prices.dta", clear
+
+*DAtumsvariable generieren
+gen DATE = tm(1945m12) + _n
+format DATE %tm
+tsset DATE
+drop observation_date
+order DATE
+
+*Grafikerstellung
+tsline wtisplc, xtitle("Jahr") ytitle("WTI-Ölpreis (in USD)")
+
+*optimale Lags finden
+varsoc wtisplc
+*dfuller Test
+dfuller wtisplc, lags(2) 
+
+*b)
+* 1. Logarithmus bilden
+gen ln_wti = ln(wtisplc)
+
+
+* 2. Erste Differenz bilden 
+gen d_ln_wti = D.ln_wti
+label variable d_ln_wti "Monatsrendite des WTI-Ölpreises"
+
+
+tsline d_ln_wti
+corrgram d_ln_wti, lags(12)
+ac d_ln_wti
+pac d_ln_wti
+
+*Schätzen des Modells
+arima d_ln_wti, ma(1)
+
+*c)
+*Teil 1 Modellvergleich
+eststo clear
+quietly arima d_ln_wti, ma(1)
+eststo MA1
+
+quietly arima d_ln_wti, ar(1)
+eststo AR1
+
+quietly arima d_ln_wti, arima(1,0,1)
+eststo ARMA11
+
+* Latex export
+esttab MA1 AR1 ARMA11 using "modellvergleich.tex", replace ///
+    cells(none) ///
+    stats(N aic bic, labels("Beobachtungen" "AIC" "BIC") fmt(0 4 4)) /// 
+    mtitles("MA(1)" "AR(1)" "ARMA(1,1)") ///            
+    title("Vergleich der Modellspezifikationen anhand von Informationskriterien") ///
+    booktabs alignment(c) noobs 
+	
+*Teil 2
+quietly arima d_ln_wti, ma(1) 
+predict e, residuals
+
+* Ljung-Box Test 
+wntestq e
+
+* ACF der Residuen 
+ac e, title("ACF der Residuen") ytitle("Autokorrelationen der Residuen")
+
+* Histogramm 
+histogram e, normal title("Histogramm der Residuen vs. Normalverteilung")
+
+* Quantil-Quantil-Plot 
+qnorm e, title("Normal Q-Q Plot der Residuen")
+
+* Kernel-Density-Plot
+kdensity e, normal title("Kerndichteschätzung der Residuen")
+
+*Skewness/Kurtosis-Test
+sktest e
+
+
+
+*d)
+	
+* Residuen Standardisieren
+egen res_std = std(e)
+
+* 2. Absolute Werte bilden 
+gen abs_res = abs(res_std)
+
+* sortieren
+gsort -abs_res
+
+* top ten schocks
+list DATE d_ln_wti res_std in 1/10
+
+*Grafikerstellung
+
+sort DATE
+
+*Marker definieren
+gen top10_marker = d_ln_wti if abs_res >= 3.8149
+
+* Grafik generieren
+twoway (tsline d_ln_wti, lcolor(black) lwidth(thin)) /// 
+       (scatter top10_marker DATE, mcolor(red) msymbol(O) msize(medium)), /// 
+       title("WTI-Ölpreisrenditen und historische Top-10-Schocks") ///
+       ytitle("Monatliche Rendite") ///
+       xtitle("Zeit") ///
+       legend(order(1 "Tatsächliche Rendite" 2 "Top 10 Modellabweichungen") pos(6)  rows(1) region(lcolor(none))) ///
+       name(kombi_plot, replace)
+
+* Export
+graph export "rendite_top10_schocks.pdf", as(pdf) replace
+
+*Bonus
+
+* maximum der Ölpreise 
+gen max_12m = max(L1.ln_wti, L2.ln_wti, L3.ln_wti, L4.ln_wti, L5.ln_wti, L6.ln_wti, L7.ln_wti, L8.ln_wti, L9.ln_wti, L10.ln_wti, L11.ln_wti, L12.ln_wti)
+
+*NOPI werte berechnen
+gen NOPI = max(0, ln_wti - max_12m)
+
+* NOPI Schockausgabe
+gsort -NOPI
+list DATE NOPI ln_wti max_12m in 1/10
+
+* Grafik
+sort DATE
+twoway (tsline res_std, lcolor(gs12) yaxis(1)) ///
+       (tsline NOPI, lcolor(red) lwidth(medthick) yaxis(2)), ///
+       title("Vergleich: Standardisierte Residuen vs. NOPI") ///
+       ytitle("Standardabweichungen", axis(1)) ///
+       ytitle("NOPI", axis(2)) ///
+       legend(order(1 "ARMA-Residuen" 2 "Hamilton NOPI") pos(6) region(lcolor(none))) ///
+       name(nopi_plot, replace)
+
+log close
+exit 
