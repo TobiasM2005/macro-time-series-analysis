@@ -1,5 +1,4 @@
-# macro-time-series-analysis
-Results of different Problemsets concerning Okuns's Law, Consumption, Oil Prices, ARMA Processes, Fiscal and Monetary Policy and ADL Modeling.
+# macro-time-series-analysi
 
 # Applied Macroeconometrics & Time Series Analysis
 
