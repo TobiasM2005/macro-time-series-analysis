@@ -1,1 +1,214 @@
+******************
+* 3. Problemset
+* Tobias Morgenstern
+******************
+
+* Aufgabe 1
+
+version 19.5
+set more off
+clear all
+
+use "..\FISCALREACTION.dta", clear
+
+*a)
+tsset DATE
+order DATE
+
+*Plots
+twoway tsline PD_GER PD_FRA, legend(position(6)) title("Primärdefizitquoten in Deutschland und Frankreich") subtitle("Darstellung von 1995 bis 2024") xlabel(1995(5)2025)
+
+twoway tsline DEBT_GER DEBT_FRA , legend(position(6)) title("Schuldenstandsquoten in Deutschland und Frankreich") subtitle("Darstellung von 1995 bis 2024") xlabel(1995(5)2025)
+
+*b) und c) 
+reg PD_GER L.DEBT_GER GAP_GER
+estat dwatson 
+estat bgodfrey
+estat hettest
+local rho_GER = _b[L.DEBT_GER]
+
+reg PD_FRA L.DEBT_FRA GAP_FRA
+estat dwatson
+estat bgodfrey
+estat hettest
+local rho_FRA = _b[L.DEBT_FRA]
+
+*Wachstumrate gamma berechnen
+gen GAMMA_GER = (GDPR_GER - L.GDPR_GER)/L.GDPR_GER
+gen GAMMA_FRA = (GDPR_FRA - L.GDPR_FRA)/L.GDPR_FRA
+
+* max. kompatibles r
+sum GAMMA_GER 
+local gamma_GER = r(mean)
+di (1 - `rho_GER')*(1+ `gamma_GER') -1
+
+sum GAMMA_FRA
+local gamma_FRA = r(mean)
+di (1 - `rho_FRA')*(1+ `gamma_FRA') -1
+
+prais PD_GER L.DEBT_GER GAP_GER
+prais PD_FRA L.DEBT_FRA GAP_FRA
+*Aufgabe 2
+*b)
+use "C:\Users\tobia\Documents\Studium\4. Semester\makroökonomisches Seminar\3.Problemset\Data_PS3\TAYLORRULE.dta", clear
+
+tsset DATE
+
+*Berechnung der Inflatiosnrate
+gen pi = ((HICP-L4.HICP)/L4.HICP)*100
+
+*Outpulücke berechnen
+gen BIP_ln = ln(GDP)
+tsfilter hp GAP = BIP_ln, smooth(1600)
+
+*in Prozent umrechnen
+gen y_gap = GAP * 100
+
+*Modelle schätzen
+reg ESTR pi y_gap if DATE >= yq(1999,1)
+estat dwatson
+estat bgodfrey, lags(1)
+
+reg ESTR pi y_gap L.ESTR if DATE >= yq(1999,1)
+estat bgodfrey, lags(1)
+
+nlcom (g_pi: _b[pi] / (1- _b[L.ESTR])) ///
+(g_y: _b[y_gap] / (1- _b[L.ESTR])) ///
+(alpha: _b[_cons] / (1- _b[L.ESTR]))
+
+*Grafik erstellen
+tsline ESTR pi if DATE >= yq(1999,1), title("EZB-Zinspolitik und Inflation (1999-2025)") ytitle("Prozent") tline(2008q3, lcolor(blue)) legend(label(1 "Zinssatz (ESTR)") label (2 "Inflation (pi)"))
+
+*Chow-TEST
+gen crisis = (DATE >= yq(2008,3))
+
+gen pi_crisis = pi * crisis
+gen y_gap_crisis = y_gap * crisis
+
+regress ESTR pi y_gap crisis pi_crisis y_gap_crisis if DATE >= yq(1999,1)
+
+test crisis pi_crisis y_gap_crisis
+
+*c)
+
+gen DATE_sq = DATE^2
+
+reg BIP_ln DATE DATE_sq
+predict GAP2, resid
+gen y_gap2 = GAP2 *100
+
+tsline y_gap y_gap2  if DATE > yq(1999,1), ///
+title("Vergleich der Outputlücken-Maße") ///
+ytitle("Abweichung vom Trend in Prozent") ///
+legend(label(1 "HP-Filter") label(2 "Quadratischer Trend")) 
+
+*Schätzung aus b) um  Inflationerwartung erweitert
+reg ESTR F1.pi y_gap L.ESTR if DATE > yq(1999,1)
+estat bgodfrey, lags(1)
+
+nlcom (g_pi: _b[F1.pi] / (1- _b[L.ESTR])) ///
+(g_y: _b[y_gap] / (1- _b[L.ESTR])) ///
+(alpha: _b[_cons] / (1- _b[L.ESTR]))
+
+*Aufgabe 3
+*Der Einkommensdatensatz wurde zuvor in eine .dta Datei umgewandelt
+use "C:\Users\tobia\Documents\Studium\4. Semester\makroökonomisches Seminar\3.Problemset\Data_PS3\Einkommen.dta", clear
+
+gen DATE = tq(1946q4) + _n
+format DATE %tq
+tsset DATE
+drop observation_date
+order DATE
+
+save "C:\Users\tobia\Documents\Studium\4. Semester\makroökonomisches Seminar\3.Problemset\Data_PS3\Einkommen_DATE.dta", replace
+
+*Mergen des Einkommens und Konsums Datensatzes
+use "C:\Users\tobia\Documents\Studium\4. Semester\makroökonomisches Seminar\3.Problemset\Data_PS3\Konsumausgaben.dta"
+
+gen DATE = tq(1946q4) + _n
+format DATE %tq
+tsset DATE
+drop observation_date
+order DATE
+
+save "C:\Users\tobia\Documents\Studium\4. Semester\makroökonomisches Seminar\3.Problemset\Data_PS3\Konsumausgaben_DATE.dta", replace
+
+cd "C:\Users\tobia\Documents\Studium\4. Semester\makroökonomisches Seminar\3.Problemset\Data_PS3"
+merge 1:1 DATE using Einkommen_DATE.dta
+save MERGED1.dta, replace
+
+drop _merge
+
+label variable pcecc96 "Reale private Konsumausgaben"
+label variable dpic96 "Reale verfügbare persönliche Einkommen"
+
+tsline pcecc96 dpic96, title("Einkommen und Konsumausgaben in den USA") subtitle("1947-2026") legend(cols(1) position(7))
+
+*b)
+varsoc pcecc96
+dfuller pcecc96, lags(2) trend
+
+gen konsum_dif = pcecc96 - L.pcecc96
+varsoc konsum_dif
+dfuller konsum_dif, lags(1)
+
+label variable konsum_dif "Erste Differenz der Konsumausgaben"
+ac konsum_dif, lags(12) title("Autokorrelationsfunktion des Konsums")
+pac konsum_dif, lags(12) title("partielle Autokorrelationsfunktion des Konsums")
+
+*ARMA(0,0)
+ arima konsum_dif, arima(0,0,0)
+estat ic
+
+*AR 1 Modell
+ arima konsum_dif, arima(1,0,0)
+estat ic
+
+* MA 1 Modell
+ arima konsum_dif, arima(0,0,1)
+estat ic
+
+* ARMA(1,1) Modell
+ arima konsum_dif, arima(1,0,1)
+estat ic
+
+* Arma(2,1)
+ arima konsum_dif, arima(2,0,1)
+estat ic
+
+* ARMA(1,2)
+ arima konsum_dif, arima(1,0,2)
+estat ic
+
+*Residuenanalyse
+quietly arima konsum_dif, arima(0,0,0)
+predict e, resid
+wntestq e
+
+* Histogramm 
+histogram e, normal title("Histogramm der Residuen vs. Normalverteilung")
+
+* Quantil-Quantil-Plot 
+qnorm e, title("Normal Q-Q Plot der Residuen")
+
+* Kernel-Density-Plot
+kdensity e , normal title("Kerndichteschätzung der Residuen")
+
+* 1. Erste Differenz für das Einkommen bilden (Veränderung zum Vorquartal)
+gen Einkommen_dif = dpic96 - L.dpic96
+
+* 2. Das ADL(1,1) Modell schätzen (analog zu 'regress y L1.y x L1.x' aus der Vorlesung)
+regress konsum_dif L1.konsum_dif Einkommen_dif L1.Einkommen_dif
+
+* 3. Den langfristigen Multiplikator berechnen (Delta-Methode)
+nlcom (LongRunMultiplier: (_b[Einkommen_dif] + _b[L1.Einkommen_dif]) / (1 - _b[L1.konsum_dif]))
+
+
+
+
+
+
+exit
+
+
 
